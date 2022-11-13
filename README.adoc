@@ -1,0 +1,4 @@
+= OPA REDIS PLUGIN
+
+Simple OPA golang plugin that provides REDIS integration.
+The plugin only implements the CMD funtion that provides full flexibility and simple implementation.
