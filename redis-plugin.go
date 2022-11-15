@@ -1,10 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"net/http"
 	"os"
 
+	"github.com/go-redis/redis/v9"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/cmd"
 	"github.com/open-policy-agent/opa/rego"
@@ -12,70 +13,50 @@ import (
 )
 
 func main() {
+	var client *redis.Client
+	var addr string
 
-	cmd.RootCommand.Execute()
+	//get redis address from env vars - set default if not found
+	addr, found := os.LookupEnv("OPA_REDIS_ADDR")
+	if !found {
+		addr = "redis://localhost:6379"
+	}
 
-	rego.RegisterBuiltinDyn(
+	//parse address into redis opts - exit if error
+	opts, err := redis.ParseURL(addr)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	//create redis client and test connection
+	client = redis.NewClient(opts)
+
+	if _, e := client.Ping(context.Background()).Result(); e != nil {
+		fmt.Println(e)
+		os.Exit(1)
+	}
+
+	//implementation of redis command - get array of args and pass to redis client.Do - return result as string
+	rediscmd := func(ctx rego.BuiltinContext, terms *ast.Term) (*ast.Term, error) {
+		var args []interface{}
+		ast.As(terms.Value, &args)
+
+		p, err := client.Do(context.Background(), args[:]...).Result()
+
+		return ast.StringTerm(fmt.Sprintf("%s", p)), err
+	}
+
+	//register opa 'redis' function
+	rego.RegisterBuiltin1(
 		&rego.Function{
-			Name:    "redis",
-			Decl:    types.NewVariadicFunction(types.Args(types.S), types.S, types.A),
-			Memoize: true,
+			Name: "redis",
+			Decl: types.NewFunction(types.Args(types.NewArray(nil, types.S)), types.S),
 		},
-		func(bctx rego.BuiltinContext, terms []*ast.Term) (*ast.Term, error) {
-			parsed := make([]string, 1)
-			for _, t := range terms {
-				var ter string
-				if err := ast.As(t.Value, &ter); err != nil {
-					return nil, err
-				}
-				ter = ""
-				parsed = append(parsed, ter)
-			}
-			return nil, nil
-		},
+		rediscmd,
 	)
 
-	rego.RegisterBuiltin2(
-		&rego.Function{
-			Name:    "github.repo",
-			Decl:    types.NewFunction(types.Args(types.S, types.S), types.A),
-			Memoize: true,
-		},
-		func(bctx rego.BuiltinContext, a, b *ast.Term) (*ast.Term, error) {
-
-			var org, repo string
-
-			if err := ast.As(a.Value, &org); err != nil {
-				return nil, err
-			} else if ast.As(b.Value, &repo); err != nil {
-				return nil, err
-			}
-
-			req, err := http.NewRequest("GET", fmt.Sprintf("https://api.github.com/repos/%v/%v", org, repo), nil)
-			if err != nil {
-				return nil, err
-			}
-
-			resp, err := http.DefaultClient.Do(req.WithContext(bctx.Context))
-			if err != nil {
-				return nil, err
-			}
-
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf(resp.Status)
-			}
-
-			v, err := ast.ValueFromReader(resp.Body)
-			if err != nil {
-				return nil, err
-			}
-
-			return ast.NewTerm(v), nil
-		},
-	)
-
+	//execute opa process
 	if err := cmd.RootCommand.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)

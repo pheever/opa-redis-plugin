@@ -1,4 +1,13 @@
 = OPA REDIS PLUGIN
 
-Simple OPA golang plugin that provides REDIS integration.
-The plugin only implements the CMD funtion that provides full flexibility and simple implementation.
+Simple OPA golang builtin function that provides REDIS integration.
+The builtin function only implements the `Do` funtion that provides full flexibility and simple implementation.
+
+== Quickstart
+```
+docker run -d -p 6379:6379 redis/redis-stack
+go build -o oparedis
+
+OPA_REDIS_ADDR='redis://localhost:6379' ./oparedis eval 'redis(["set","randkey", "randval"])'
+OPA_REDIS_ADDR='redis://localhost:6379' ./oparedis eval 'redis(["get","randkey"])'
+```
